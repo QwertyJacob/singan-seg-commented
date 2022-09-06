@@ -8,80 +8,111 @@ import math
 import matplotlib.pyplot as plt
 from SinGAN.imresize import imresize
 
-def train(opt,Gs,Zs,reals,NoiseAmp):
-    real_ = functions.read_image(opt)
+def train(options, generator_list, Zs, reals_pyramid, NoiseAmp):
+    real_ = functions.read_image(options)
     #print("real_ ====", real_.shape)
     in_s = 0
     scale_num = 0
-    real = imresize(real_,opt.scale1,opt)
+    real = imresize(real_, options.scale1, options)
     #print("real 1 ===", real.shape)
-    reals = functions.creat_reals_pyramid(real,reals,opt)
+    reals_pyramid = functions.creat_reals_pyramid(real, reals_pyramid, options)
     nfc_prev = 0
 
-    while scale_num<opt.stop_scale+1:
-        opt.nfc = min(opt.nfc_init * pow(2, math.floor(scale_num / 4)), 128)
-        opt.min_nfc = min(opt.min_nfc_init * pow(2, math.floor(scale_num / 4)), 128)
+    while scale_num<options.stop_scale+1:
 
-        opt.out_ = functions.generate_dir2save(opt)
-        opt.outf = '%s/%d' % (opt.out_,scale_num)
+        options.nfc = min(options.nfc_init * pow(2, math.floor(scale_num / 4)), 128)
+        options.min_nfc = min(options.min_nfc_init * pow(2, math.floor(scale_num / 4)), 128)
+
+        options.out_ = functions.generate_dir2save(options)
+        options.outf = '%s/%d' % (options.out_, scale_num)
         try:
-            os.makedirs(opt.outf)
+            os.makedirs(options.outf)
         except OSError:
                 pass
 
         #plt.imsave('%s/in.png' %  (opt.out_), functions.convert_image_np(real), vmin=0, vmax=1)
         #plt.imsave('%s/original.png' %  (opt.out_), functions.convert_image_np(real_), vmin=0, vmax=1)
-        plt.imsave('%s/real_scale.png' %  (opt.outf), functions.convert_image_np(reals[scale_num]), vmin=0, vmax=1)
+        plt.imsave('%s/real_scale.png' % (options.outf), functions.convert_image_np(reals_pyramid[scale_num]), vmin=0, vmax=1)
 
-        D_curr,G_curr = init_models(opt)
-        if (nfc_prev==opt.nfc):
-            G_curr.load_state_dict(torch.load('%s/%d/netG.pth' % (opt.out_,scale_num-1)))
-            D_curr.load_state_dict(torch.load('%s/%d/netD.pth' % (opt.out_,scale_num-1)))
+        current_discriminator,current_generator = init_models(options)
 
-        z_curr,in_s,G_curr = train_single_scale(D_curr,G_curr,reals,Gs,Zs,in_s,NoiseAmp,opt)
+        if (nfc_prev==options.nfc):
+            current_generator.load_state_dict(torch.load('%s/%d/netG.pth' % (options.out_, scale_num - 1)))
+            current_discriminator.load_state_dict(torch.load('%s/%d/netD.pth' % (options.out_, scale_num - 1)))
 
-        G_curr = functions.reset_grads(G_curr,False)
-        G_curr.eval()
-        D_curr = functions.reset_grads(D_curr,False)
-        D_curr.eval()
+        z_curr,in_s,current_generator = train_single_scale(current_discriminator, current_generator, reals_pyramid, generator_list, Zs, in_s, NoiseAmp, options)
 
-        Gs.append(G_curr)
+        current_generator = functions.reset_grads(current_generator,False)
+        current_generator.eval()
+        current_discriminator = functions.reset_grads(current_discriminator,False)
+        current_discriminator.eval()
+
+        generator_list.append(current_generator)
         Zs.append(z_curr)
-        NoiseAmp.append(opt.noise_amp)
+        NoiseAmp.append(options.noise_amp)
 
-        torch.save(Zs, '%s/Zs.pth' % (opt.out_))
-        torch.save(Gs, '%s/Gs.pth' % (opt.out_))
-        torch.save(reals, '%s/reals.pth' % (opt.out_))
-        torch.save(NoiseAmp, '%s/NoiseAmp.pth' % (opt.out_))
+        torch.save(Zs, '%s/Zs.pth' % (options.out_))
+        torch.save(generator_list, '%s/Gs.pth' % (options.out_))
+        torch.save(reals_pyramid, '%s/reals.pth' % (options.out_))
+        torch.save(NoiseAmp, '%s/NoiseAmp.pth' % (options.out_))
 
         scale_num+=1
-        nfc_prev = opt.nfc
-        del D_curr,G_curr
+        nfc_prev = options.nfc
+        del current_discriminator,current_generator
     return
 
 
 
-def train_single_scale(netD,netG,reals,Gs,Zs,in_s,NoiseAmp,opt,centers=None):
+def train_single_scale(netD, netG, reals, Gs, Zs, in_s, NoiseAmp, opt, centers=None):
+    '''
 
+    Parameters
+    ----------
+    netD
+    netG
+    reals
+    Gs
+    Zs
+    in_s
+    NoiseAmp
+    opt
+    centers
+
+    Returns
+    -------
+
+    '''
+    # We take one specific path of the pyramid.
     real = reals[len(Gs)]
     #print("real shape===", real.shape)
+    # opt.ker_size -> number of kernels (globally fixed)
+    # opt.num_layer -> number of layers (globally fixed)
+    # These two fellas are the ones that change when we change the learning scale
+    # They indicate the hight and width of the current scale path.
     opt.nzx = real.shape[2]#+(opt.ker_size-1)*(opt.num_layer)
     opt.nzy = real.shape[3]#+(opt.ker_size-1)*(opt.num_layer)
+
+    # receptive field = fixed_kernel_size + (( fixed_kernel_size -1 ) * fixed_number_of_layers * fixed_stride )
+    # The receptive field si fixed for all scales... same for the paddings for noise and images!!
     opt.receptive_field = opt.ker_size + ((opt.ker_size-1)*(opt.num_layer-1))*opt.stride
     pad_noise = int(((opt.ker_size - 1) * opt.num_layer) / 2)
     pad_image = int(((opt.ker_size - 1) * opt.num_layer) / 2)
+
     if opt.mode == 'animation_train':
         opt.nzx = real.shape[2]+(opt.ker_size-1)*(opt.num_layer)
         opt.nzy = real.shape[3]+(opt.ker_size-1)*(opt.num_layer)
         pad_noise = 0
-    m_noise = nn.ZeroPad2d(int(pad_noise))
-    m_image = nn.ZeroPad2d(int(pad_image))
+
+
+    # These torchobjects serve as pad adders for whatever tensor they are feed with.
+    noise_padder_layer = nn.ZeroPad2d(int(pad_noise))
+    image_padder_layer = nn.ZeroPad2d(int(pad_image))
 
     alpha = opt.alpha
 
     fixed_noise = functions.generate_noise([opt.nc_z,opt.nzx,opt.nzy],device=opt.device)
     z_opt = torch.full(fixed_noise.shape, 0, device=opt.device, dtype=torch.bool)
-    z_opt = m_noise(z_opt)
+    z_opt = noise_padder_layer(z_opt)
 
     # setup optimizer
     optimizerD = optim.Adam(netD.parameters(), lr=opt.lr_d, betas=(opt.beta1, 0.999))
@@ -96,57 +127,98 @@ def train_single_scale(netD,netG,reals,Gs,Zs,in_s,NoiseAmp,opt,centers=None):
     z_opt2plot = []
 
     for epoch in range(opt.niter):
+
+        '''
+        THIS BLOCK GENERATES THE NOISE TENSOR
+        '''
+        # guess SR_train stands for Super-resolution training, need to check SinGAN paper...
         if (Gs == []) & (opt.mode != 'SR_train'):
+            # If we are in the first scale, and we are not in the SR_train setting, then we create 2 noise maps.
+            # The first, z_opt, is the one that is going to be saved in memory for reconstruction purposes as stated in
+            # the SinGAN paper. Though, they call it z_star in the paper!!!
             z_opt = functions.generate_noise([1,opt.nzx,opt.nzy], device=opt.device)
-            #print("z_opt shape===", z_opt.shape)
-            z_opt = m_noise(z_opt.expand(1,opt.nc_z,opt.nzx,opt.nzy)) # # changed second paramter from 3 to opt.nc_z - Vajira
-            #print("z_opt shape (after)===", z_opt.shape)
+            # The expand operation is kind of a shape trasnformation but some broadcast is done to fill the expanded dimensions.
+            # At this poit z_opt is a (1,1,x,y) tensor, with the expand operation we turn it to a (1,4,x,y) tensor, so we
+            # repeat the whole noise map for 4 channels.
+            expanded_z_opt = z_opt.expand(1,opt.nc_z,opt.nzx,opt.nzy) # changed second parameter from 3 to opt.nc_z - Vajira
+            z_opt = noise_padder_layer(expanded_z_opt)
+
+            # Now the noise_ tensor is going to be the normal noise map for learning purposes... We only need this one when we are
+            # not at the coarsest scale
             noise_ = functions.generate_noise([1,opt.nzx,opt.nzy], device=opt.device)
-            noise_ = m_noise(noise_.expand(1,opt.nc_z,opt.nzx,opt.nzy)) # changed second paramter from 3 to opt.nc_z - Vajira
+            noise_ = noise_padder_layer(noise_.expand(1,opt.nc_z,opt.nzx,opt.nzy)) # changed second paramter from 3 to opt.nc_z - Vajira
         else:
-            noise_ = functions.generate_noise([opt.nc_z,opt.nzx,opt.nzy], device=opt.device)
-            noise_ = m_noise(noise_)
+            noise_ = functions.generate_noise([opt.nc_z, opt.nzx, opt.nzy], device=opt.device)
+            noise_ = noise_padder_layer(noise_)
+        '''
+        END OF BLOCK (EOB) 
+        '''
+
+
 
         ############################
         # (1) Update D network: maximize D(x) + D(G(z))
         ###########################
         for j in range(opt.Dsteps):
+
             # train with real
             netD.zero_grad()
-
+            # pass the real patch trough the discriminator.
             output = netD(real).to(opt.device)
-            #D_real_map = output.detach()
-            errD_real = -output.mean()#-a
+
+            # We want to maximize this output, or, equivalently,
+            # minimize the negative of this output ;)
+            # The torch optimizer (Adam) will do a gradient descent step, so we
+            # can compute the gradient w.r.t. a loss function to MINIMIZE
+            errD_real = -output.mean()
             errD_real.backward(retain_graph=True)
+
+            # Now, this maximization True positive score, is saved just for plotting purposes ;)
             D_x = -errD_real.item()
 
             # train with fake
             if (j==0) & (epoch == 0):
+
                 if (Gs == []) & (opt.mode != 'SR_train'):
-                    prev = torch.full([1,opt.nc_z,opt.nzx,opt.nzy], 0, device=opt.device, dtype=torch.bool)
+                    # If we are in the first scale and NOT in super-resolution downstream task.
+                    # In this case, our "previous" scale patch is a zeros tensor: (in this code, the authors of
+                    # SinGAN-Seg have transformed it to a "falses" tensor, with the boolean type specification.
+                    prev = torch.full([1, opt.nc_z, opt.nzx, opt.nzy], 0, device=opt.device, dtype=torch.bool)
+                    # up to this point, in_s was a 0 integer :/
                     in_s = prev
-                    prev = m_image(prev)
+                    prev = image_padder_layer(prev)
+                    # Same story holds for noise, the "previous noise" patch is a "falses" tensor
                     z_prev = torch.full([1,opt.nc_z,opt.nzx,opt.nzy], 0, device=opt.device, dtype=torch.bool)
-                    z_prev = m_noise(z_prev)
+                    z_prev = noise_padder_layer(z_prev)
                     opt.noise_amp = 1
+
                 elif opt.mode == 'SR_train':
+                    # not first scale, SR task:
                     z_prev = in_s
                     criterion = nn.MSELoss()
                     RMSE = torch.sqrt(criterion(real, z_prev))
                     opt.noise_amp = opt.noise_amp_init * RMSE
-                    z_prev = m_image(z_prev)
+                    z_prev = image_padder_layer(z_prev)
                     prev = z_prev
+
                 else:
-                    prev = draw_concat(Gs,Zs,reals,NoiseAmp,in_s,'rand',m_noise,m_image,opt)
-                    prev = m_image(prev)
-                    z_prev = draw_concat(Gs,Zs,reals,NoiseAmp,in_s,'rec',m_noise,m_image,opt)
+                    # not first scale, nor SR task:
+                    # note that now in_s contains the previous scale patch
+                    mode_param = 'rand'
+                    prev = draw_concat(Gs, Zs, reals, NoiseAmp, in_s, mode_param, noise_padder_layer, image_padder_layer, opt)
+                    prev = image_padder_layer(prev)
+
+                    mode_param = 'rec'
+                    z_prev = draw_concat(Gs, Zs, reals, NoiseAmp, in_s, mode_param, noise_padder_layer,image_padder_layer,opt)
+
                     criterion = nn.MSELoss()
                     RMSE = torch.sqrt(criterion(real, z_prev))
                     opt.noise_amp = opt.noise_amp_init*RMSE
-                    z_prev = m_image(z_prev)
+
+                    z_prev = image_padder_layer(z_prev)
             else:
-                prev = draw_concat(Gs,Zs,reals,NoiseAmp,in_s,'rand',m_noise,m_image,opt)
-                prev = m_image(prev)
+                prev = draw_concat(Gs,Zs,reals,NoiseAmp,in_s,'rand',noise_padder_layer,image_padder_layer,opt)
+                prev = image_padder_layer(prev)
 
             if opt.mode == 'paint_train':
                 prev = functions.quant2centers(prev,centers)
@@ -224,33 +296,59 @@ def train_single_scale(netD,netG,reals,Gs,Zs,in_s,NoiseAmp,opt,centers=None):
     functions.save_networks(netG,netD,z_opt,opt)
     return z_opt,in_s,netG    
 
-def draw_concat(Gs,Zs,reals,NoiseAmp,in_s,mode,m_noise,m_image,opt):
-    G_z = in_s
-    if len(Gs) > 0:
+
+
+def draw_concat(list_of_generators, Zs, real_patches_pyramid, NoiseAmp, previous_scale_patch, mode, noise_padder_layer, image_padder_layer, opt):
+    '''
+
+    Parameters
+    ----------
+    list_of_generators
+    Zs
+    real_patches_pyramid
+    NoiseAmp
+    previous_scale_patch
+    mode
+    noise_padder_layer
+    image_padder_layer
+    opt
+
+    Returns
+    -------
+
+    '''
+
+    G_z = previous_scale_patch
+
+    if len(list_of_generators) > 0:
+
         if mode == 'rand':
             count = 0
             pad_noise = int(((opt.ker_size-1)*opt.num_layer)/2)
+
             if opt.mode == 'animation_train':
                 pad_noise = 0
-            for G,Z_opt,real_curr,real_next,noise_amp in zip(Gs,Zs,reals,reals[1:],NoiseAmp):
+
+            for G,Z_opt,real_curr,real_next,noise_amp in zip(list_of_generators, Zs, real_patches_pyramid, real_patches_pyramid[1:], NoiseAmp):
                 if count == 0:
                     z = functions.generate_noise([1, Z_opt.shape[2] - 2 * pad_noise, Z_opt.shape[3] - 2 * pad_noise], device=opt.device)
                     z = z.expand(1, opt.nc_z, z.shape[2], z.shape[3]) # changed the second parameter from 3 to opt.nc_z
                 else:
                     z = functions.generate_noise([opt.nc_z,Z_opt.shape[2] - 2 * pad_noise, Z_opt.shape[3] - 2 * pad_noise], device=opt.device)
-                z = m_noise(z)
+                z = noise_padder_layer(z)
                 G_z = G_z[:,:,0:real_curr.shape[2],0:real_curr.shape[3]]
-                G_z = m_image(G_z)
+                G_z = image_padder_layer(G_z)
                 z_in = noise_amp*z+G_z
                 G_z = G(z_in.detach(),G_z)
                 G_z = imresize(G_z,1/opt.scale_factor,opt)
                 G_z = G_z[:,:,0:real_next.shape[2],0:real_next.shape[3]]
                 count += 1
+
         if mode == 'rec':
             count = 0
-            for G,Z_opt,real_curr,real_next,noise_amp in zip(Gs,Zs,reals,reals[1:],NoiseAmp):
+            for G,Z_opt,real_curr,real_next,noise_amp in zip(list_of_generators, Zs, real_patches_pyramid, real_patches_pyramid[1:], NoiseAmp):
                 G_z = G_z[:, :, 0:real_curr.shape[2], 0:real_curr.shape[3]]
-                G_z = m_image(G_z)
+                G_z = image_padder_layer(G_z)
                 z_in = noise_amp*Z_opt+G_z
                 G_z = G(z_in.detach(),G_z)
                 G_z = imresize(G_z,1/opt.scale_factor,opt)
@@ -258,7 +356,10 @@ def draw_concat(Gs,Zs,reals,NoiseAmp,in_s,mode,m_noise,m_image,opt):
                 #if count != (len(Gs)-1):
                 #    G_z = m_image(G_z)
                 count += 1
+
     return G_z
+
+
 
 def train_paint(opt,Gs,Zs,reals,NoiseAmp,centers,paint_inject_scale):
     in_s = torch.full(reals[0].shape, 0, device=opt.device, dtype=torch.bool)

@@ -7,6 +7,7 @@ import torch
 
 
 if __name__ == '__main__':
+
     parser = get_arguments()
     parser.add_argument('--input_dir', help='input image dir', default='Input/Images')
     parser.add_argument('--input_name', help='input image name', required=True)
@@ -15,7 +16,8 @@ if __name__ == '__main__':
     opt = parser.parse_args()
     opt = functions.post_config(opt)
     opt.device = torch.device("cpu" if opt.not_cuda else "cuda:{}".format(opt.gpu_id))
-    Gs = []
+
+    generator_list = []
     Zs = []
     reals = []
     NoiseAmp = []
@@ -28,7 +30,11 @@ if __name__ == '__main__':
             os.makedirs(dir2save)
         except OSError:
             pass
+
         real = functions.read_image(opt)
+
         functions.adjust_scales2image(real, opt)
-        train(opt, Gs, Zs, reals, NoiseAmp)
-        SinGAN_generate(Gs,Zs,reals,NoiseAmp,opt)
+
+        train(opt, generator_list, Zs, reals, NoiseAmp)
+
+        SinGAN_generate(generator_list, Zs, reals, NoiseAmp, opt)

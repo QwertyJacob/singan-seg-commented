@@ -84,16 +84,35 @@ def convert_image_np_2d(inp):
     # inp = std*
     return inp
 
-def generate_noise(size,device,num_samp=1,type='gaussian', scale=1):
+def generate_noise(size, device, num_samp=1, type='gaussian', scale=1):
+    '''
+
+    Parameters
+    ----------
+    size: the shape of the noise tensor we want to generate (manages up to three dimensions: channel, x and y). So we
+        have the oter "num_samp" parameter for the number of samples ;)
+    device
+    num_samp
+    type
+    scale
+
+    Returns
+    -------
+
+    '''
+
     if type == 'gaussian':
         noise = torch.randn(num_samp, size[0], round(size[1]/scale), round(size[2]/scale), device=device)
         noise = upsampling(noise,size[1], size[2])
+
     if type =='gaussian_mixture':
         noise1 = torch.randn(num_samp, size[0], size[1], size[2], device=device)+5
         noise2 = torch.randn(num_samp, size[0], size[1], size[2], device=device)
         noise = noise1+noise2
+
     if type == 'uniform':
         noise = torch.randn(num_samp, size[0], size[1], size[2], device=device)
+
     return noise
 
 def plot_learning_curves(G_loss,D_loss,epochs,label1,label2,name):

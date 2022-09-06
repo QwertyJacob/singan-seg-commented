@@ -20,12 +20,22 @@ def weights_init(m):
         m.bias.data.fill_(0)
    
 class WDiscriminator(nn.Module):
+
     def __init__(self, opt):
         super(WDiscriminator, self).__init__()
         self.is_cuda = torch.cuda.is_available()
         N = int(opt.nfc)
         self.head = ConvBlock(opt.nc_im,N,opt.ker_size,opt.padd_size,1)
         self.body = nn.Sequential()
+
+        # In the SinGAN papers it is said:
+        # "We start with 32 kernels per block at the coarsest scale and increase
+        # this number by a factor of 2 every 4 scales."
+        # This is what this cycle exactly does, because our number of layers is four, we only have
+        # 3 convblock in the body o the model, and thus all the scales have 32 filters in and out.
+        # Ohterwise, if we would had more layers, the coarsest scales would have received and in-out channel conf of 32
+        # but the first convolution, which acts on the finest scale, would had 64 channels in and 32 out ;)
+        # Same holds for the generator net
         for i in range(opt.num_layer-2):
             N = int(opt.nfc/pow(2,(i+1)))
             block = ConvBlock(max(2*N,opt.min_nfc),max(N,opt.min_nfc),opt.ker_size,opt.padd_size,1)
