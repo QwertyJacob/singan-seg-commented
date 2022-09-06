@@ -14,8 +14,8 @@ if __name__ == '__main__':
     parser.add_argument('--gpu_id', help="GPU ID", default=0)
     opt = parser.parse_args()
     opt = functions.post_config(opt)
-    Gs = []
-    Zs = []
+    generator_models_list = []
+    noise_maps_list = []
     reals = []
     NoiseAmp = []
     dir2save = functions.generate_dir2save(opt)
@@ -36,14 +36,14 @@ if __name__ == '__main__':
         opt.mode = 'train'
         dir2trained_model = functions.generate_dir2save(opt)
         if (os.path.exists(dir2trained_model)):
-            Gs, Zs, reals, NoiseAmp = functions.load_trained_pyramid(opt)
+            generator_models_list, noise_maps_list, reals, NoiseAmp = functions.load_trained_pyramid(opt)
             opt.mode = mode
         else:
             print('*** Train SinGAN for SR ***')
             real = functions.read_image(opt)
             opt.min_size = 18
             real = functions.adjust_scales2image_SR(real, opt)
-            train(opt, Gs, Zs, reals, NoiseAmp)
+            train(opt, generator_models_list, noise_maps_list, reals, NoiseAmp)
             opt.mode = mode
         print('%f' % pow(in_scale, iter_num))
         Zs_sr = []
@@ -57,7 +57,7 @@ if __name__ == '__main__':
         for j in range(1, iter_num + 1, 1):
             real_ = imresize(real_, pow(1 / opt.scale_factor, 1), opt)
             reals_sr.append(real_)
-            Gs_sr.append(Gs[-1])
+            Gs_sr.append(generator_models_list[-1])
             NoiseAmp_sr.append(NoiseAmp[-1])
             z_opt = torch.full(real_.shape, 0, device=opt.device)
             m = nn.ZeroPad2d(5)

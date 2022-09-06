@@ -86,6 +86,7 @@ def convert_image_np_2d(inp):
 
 def generate_noise(size, device, num_samp=1, type='gaussian', scale=1):
     '''
+    Simple noise generation (no summing with upsampled previous patches or similar stuff here)...
 
     Parameters
     ----------
@@ -179,7 +180,7 @@ def read_image(opt):
     x = img.imread('%s/%s' % (opt.input_dir,opt.input_name))
 
     print("X shape=", x.shape)
-    if len(x.shape) == 2: # executee if imag is gray
+    if len(x.shape) == 2: # execute if imag is gray
         x = color.gray2rgb(x)
     print("x after imread===", x.shape)
     x = np2torch(x,opt)
@@ -258,15 +259,20 @@ def adjust_scales2image_SR(real_,opt):
     opt.stop_scale = opt.num_scales - scale2stop
     return real
 
-def creat_reals_pyramid(real,reals,opt):
-    if real.shape[1]==4:
-        real = real[:,0:4,:,:] # added by vajira
+
+def creat_reals_pyramid(real, reals, opt):
+
+    if real.shape[1]== 4:
+        real = real[:, 0:4, :, :] # added by vajira
     else:
-        real = real[:,0:3,:,:]
-    for i in range(0,opt.stop_scale+1,1):
+        real = real[:, 0:3, :, :]
+
+    for i in range(0, opt.stop_scale+1, 1):
+
         scale = math.pow(opt.scale_factor,opt.stop_scale-i)
         curr_real = imresize(real,scale,opt)
         reals.append(curr_real)
+
     return reals
 
 

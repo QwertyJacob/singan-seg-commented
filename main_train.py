@@ -18,8 +18,8 @@ if __name__ == '__main__':
     opt.device = torch.device("cpu" if opt.not_cuda else "cuda:{}".format(opt.gpu_id))
 
     generator_list = []
-    Zs = []
-    reals = []
+    noise_map_list = []
+    real_patch_list = []
     NoiseAmp = []
     dir2save = functions.generate_dir2save(opt)
 
@@ -35,6 +35,6 @@ if __name__ == '__main__':
 
         functions.adjust_scales2image(real, opt)
 
-        train(opt, generator_list, Zs, reals, NoiseAmp)
+        train(opt, generator_list, noise_map_list, real_patch_list, NoiseAmp)
 
-        SinGAN_generate(generator_list, Zs, reals, NoiseAmp, opt)
+        SinGAN_generate(generator_list, noise_map_list, real_patch_list, NoiseAmp, opt)
