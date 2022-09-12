@@ -20,7 +20,7 @@ if __name__ == '__main__':
     generator_list = []
     noise_map_list = []
     real_patch_list = []
-    NoiseAmp = []
+    noise_amps_list = []
     dir2save = functions.generate_dir2save(opt)
 
     if (os.path.exists(dir2save)):
@@ -35,6 +35,6 @@ if __name__ == '__main__':
 
         functions.adjust_scales2image(real, opt)
 
-        train(opt, generator_list, noise_map_list, real_patch_list, NoiseAmp)
+        train(opt, generator_list, noise_map_list, real_patch_list, noise_amps_list)
 
-        SinGAN_generate(generator_list, noise_map_list, real_patch_list, NoiseAmp, opt)
+        SinGAN_generate(generator_list, noise_map_list, real_patch_list, noise_amps_list, opt)
