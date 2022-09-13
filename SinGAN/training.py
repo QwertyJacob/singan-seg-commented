@@ -95,16 +95,17 @@ def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, c
     -------
 
     '''
+
     # We take one specific path of the pyramid.
-    real = real_patch_pyramid[len(curr_generator_list)]
+    current_real_patch = real_patch_pyramid[len(curr_generator_list)]
     # print("real shape===", real.shape)
     # opt.ker_size -> number of kernels (globally fixed)
     # opt.num_layer -> number of layers (globally fixed)
 
     # These two fellas are the ones that change when we change the learning scale
     # They indicate the height and width of the current scale path.
-    opt.nzx = real.shape[2]  # +(opt.ker_size-1)*(opt.num_layer)
-    opt.nzy = real.shape[3]  # +(opt.ker_size-1)*(opt.num_layer)
+    opt.nzx = current_real_patch.shape[2]  # +(opt.ker_size-1)*(opt.num_layer)
+    opt.nzy = current_real_patch.shape[3]  # +(opt.ker_size-1)*(opt.num_layer)
 
     # receptive field = fixed_kernel_size + (( fixed_kernel_size -1 ) * fixed_number_of_layers * fixed_stride )
     # The receptive field si fixed for all scales... the paddings of noise and image patches also!!
@@ -113,8 +114,8 @@ def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, c
     pad_image = int(((opt.ker_size - 1) * opt.num_layer) / 2)
 
     if opt.mode == 'animation_train':
-        opt.nzx = real.shape[2] + (opt.ker_size - 1) * (opt.num_layer)
-        opt.nzy = real.shape[3] + (opt.ker_size - 1) * (opt.num_layer)
+        opt.nzx = current_real_patch.shape[2] + (opt.ker_size - 1) * (opt.num_layer)
+        opt.nzy = current_real_patch.shape[3] + (opt.ker_size - 1) * (opt.num_layer)
         pad_noise = 0
 
     # These torch objects serve as pad adders for whatever tensor they are feed with.
@@ -125,12 +126,11 @@ def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, c
 
     # The following noise vector are varying for each scale training, because they are noise maps that share
     # the dimension with each scale-specific image-patch.
-
     fixed_noise = functions.generate_noise([opt.nc_z, opt.nzx, opt.nzy], device=opt.device)
     z_opt = torch.full(fixed_noise.shape, 0, device=opt.device, dtype=torch.bool)
     z_opt = noise_padder_layer(z_opt)
 
-    # setup optimizer
+    # setup optimizers
     optimizerD = optim.Adam(curr_discriminator.parameters(), lr=opt.lr_d, betas=(opt.beta1, 0.999))
     optimizerG = optim.Adam(curr_generator.parameters(), lr=opt.lr_g, betas=(opt.beta1, 0.999))
     schedulerD = torch.optim.lr_scheduler.MultiStepLR(optimizer=optimizerD, milestones=[1600], gamma=opt.gamma)
@@ -145,9 +145,7 @@ def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, c
     for epoch in range(opt.niter):
 
         '''
-        THIS BLOCK GENERATES A NOISE TENSOR that is useful for two purposes:
-         - in the case of the first scale, it is going to be useful for reconstruction purposes.
-         - in the rest of the scales, it is going to be used to feed the generator and train the discriminator, 
+        THIS BLOCK GENERATES A NOISE TENSOR that is going to be used to feed the generator and train the discriminator, 
           (however, it is going to be refined later in the code before being fed to the generator...)
         '''
         # guess SR_train stands for Super-resolution training, need to check SinGAN paper...
@@ -194,7 +192,7 @@ def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, c
             # train with real
             curr_discriminator.zero_grad()
             # pass the real patch through the discriminator.
-            output = curr_discriminator(real).to(opt.device)
+            output = curr_discriminator(current_real_patch).to(opt.device)
 
             # We want to maximize this output, or, equivalently,
             # minimize the negative of this output ;)
@@ -204,7 +202,7 @@ def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, c
             err_discriminator_real.backward(retain_graph=True)
 
             # Now, this maximization True positive score, is saved just for plotting purposes ;)
-            D_x = - err_discriminator_real.item()
+            discr_output_real = - err_discriminator_real.item()
 
             # train with fake
             # the first thing to do is generate the fake sample.
@@ -213,12 +211,12 @@ def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, c
 
             '''
             The following block generates:
-             - The up-sampled version of the previous fake patch and calls is "prev"
+             - The up-sampled version of the previous fake patch and calls is "prev_random_patch"
              - the "spatial noise" tensor as referred in the SinGAN paper
             calls it "noise". (it refines the noise_ tensor previously generated).
             '''
 
-            # First we generate the up-sampled version of the previous fake patch and calls is "prev"
+            # First we generate the up-sampled version of the previous fake patch and calls is "prev_random_patch"
             # We have to distinguish two cases: case A and case B.
             # case A
             if (j == 0) & (epoch == 0):
@@ -236,48 +234,56 @@ def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, c
                     # to represent an up-sampled version of it.
 
                     # in the first scale, the up-sampling is done creating directly this zero boolean tensor
-                    prev = torch.full([1, opt.nc_z, opt.nzx, opt.nzy], 0, device=opt.device, dtype=torch.bool)
+                    prev_random_patch = torch.full([1, opt.nc_z, opt.nzx, opt.nzy], 0, device=opt.device, dtype=torch.bool)
                     # up to this point, in_s was a 0 integer :/,
-                    in_s = prev
-                    prev = image_padder_layer(prev)
+                    in_s = prev_random_patch
+                    prev_random_patch = image_padder_layer(prev_random_patch)
 
-                    # Same story holds for noise, the "previous noise" patch is a "falses" tensor
-                    z_prev = torch.full([1, opt.nc_z, opt.nzx, opt.nzy], 0, device=opt.device, dtype=torch.bool)
-                    z_prev = noise_padder_layer(z_prev)
+                    # Same story holds for the prev_reconstructed_patch (used for the reconstruction error)
+                    prev_reconstructed_patch = torch.full([1, opt.nc_z, opt.nzx, opt.nzy], 0, device=opt.device, dtype=torch.bool)
+                    prev_reconstructed_patch = noise_padder_layer(prev_reconstructed_patch)
 
                     opt.noise_amp = 1
 
                 # case A.2
                 elif opt.mode == 'SR_train':
-                    # if we are in the SR task (irrespective of the scale), need further study:
-                    z_prev = in_s
+                    # if we are in the SR task (irrespective of the scale), need further study:  (but remember,
+                    # we are in the first epoch and in the first inner step
+                    # of the current scale training, i.e., we are in case A)
+                    prev_reconstructed_patch = in_s
                     criterion = nn.MSELoss()
-                    RMSE = torch.sqrt(criterion(real, z_prev))
+                    RMSE = torch.sqrt(criterion(current_real_patch, prev_reconstructed_patch))
                     opt.noise_amp = opt.noise_amp_init * RMSE
-                    z_prev = image_padder_layer(z_prev)
-                    prev = z_prev
+                    prev_reconstructed_patch = image_padder_layer(prev_reconstructed_patch)
+                    prev_random_patch = prev_reconstructed_patch
 
                 # case A.3
                 else:
                     # not first scale, nor SR task: (but remember, we are in the first epoch and in the first inner step
-                    # of the current scale training, i.e., we are in case A)
-                    # note that now in_s contains the previous scale image patch
-                    # because we have passed through case A.1 necessarily (and also through case B at least 2 times)
+                    # of the current scale training, i.e., we are in case A) note that now in_s contains the previous
+                    # scale image patch because we have passed through case A.1 necessarily
+                    # (and also through case B at least 2 times)
                     mode_param = 'rand'
-
-                    prev = draw_concat(curr_generator_list, noise_patch_list, real_patch_pyramid, noise_amps_list,
+                    # setting the mode_param variable to "rand" we are now generating the up-sampled version of the
+                    # previous fake patch using new random noise vectors.
+                    prev_random_patch = draw_concat(curr_generator_list, noise_patch_list, real_patch_pyramid, noise_amps_list,
                                        in_s, mode_param, noise_padder_layer, image_padder_layer, opt)
-                    prev = image_padder_layer(prev)
+                    prev_random_patch = image_padder_layer(prev_random_patch)
 
                     mode_param = 'rec'
-                    z_prev = draw_concat(curr_generator_list, noise_patch_list, real_patch_pyramid, noise_amps_list,
-                                         in_s, mode_param, noise_padder_layer, image_padder_layer, opt)
+                    # In the paper $\tilde{x}^{rec}_{n+1}$ is "the generated image at the nth scale when using these
+                    # noise maps." When it says "these noise maps, it refers to a fixed set of noise maps, here
+                    # referenced by noise_patch_list. We use them to generate $\tilde{x}^{rec}_{n+1}$ when we invoke
+                    # draw_concat with "rec" as the value of the mode parameter
+                    prev_reconstructed_patch = draw_concat(curr_generator_list, noise_patch_list, real_patch_pyramid,
+                                                      noise_amps_list, in_s, mode_param, noise_padder_layer,
+                                                      image_padder_layer, opt)
 
                     criterion = nn.MSELoss()
-                    RMSE = torch.sqrt(criterion(real, z_prev))
+                    RMSE = torch.sqrt(criterion(current_real_patch, prev_reconstructed_patch))
                     opt.noise_amp = opt.noise_amp_init * RMSE
 
-                    z_prev = image_padder_layer(z_prev)
+                    prev_reconstructed_patch = image_padder_layer(prev_reconstructed_patch)
 
             # case B
             else:
@@ -291,16 +297,16 @@ def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, c
                 # The following function creates the up-sampled version of this previous fake image patch:
                 # Notice that, at every iteration, we inject different spatial noise in the process of up-sampling
                 # through the mode parameter, which is, in this case, set to "rand". see the following function.
-                prev = draw_concat(curr_generator_list, noise_patch_list, real_patch_pyramid, noise_amps_list, in_s,
+                prev_random_patch = draw_concat(curr_generator_list, noise_patch_list, real_patch_pyramid, noise_amps_list, in_s,
                                    'rand', noise_padder_layer, image_padder_layer, opt)
-                prev = image_padder_layer(prev)
+                prev_random_patch = image_padder_layer(prev_random_patch)
 
             ##
             # don't know what this is... will study some day...
             ##
             if opt.mode == 'paint_train':
-                prev = functions.quant2centers(prev, centers)
-                plt.imsave('%s/prev.png' % (opt.outf), functions.convert_image_np(prev), vmin=0, vmax=1)
+                prev_random_patch = functions.quant2centers(prev_random_patch, centers)
+                plt.imsave('%s/prev_random_patch.png' % (opt.outf), functions.convert_image_np(prev_random_patch), vmin=0, vmax=1)
 
             ##
             # FINAL STEP TO GENERATE THE NOISE:
@@ -316,7 +322,7 @@ def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, c
                 # prior to being fed into a sequence of convolutional layers. This ensures that the GAN does not
                 # disregard the noise, as often happens in conditional schemes involving randomness"
                 # (from the SinGAN paper). That explains the following line of code:
-                noise = opt.noise_amp * noise_ + prev
+                noise = opt.noise_amp * noise_ + prev_random_patch
 
             '''
             EOB
@@ -324,18 +330,19 @@ def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, c
 
             ##
             # Now we generate our fake sample :)
-            fake = curr_generator(noise.detach(), prev)
+            fake = curr_generator(noise.detach(), prev_random_patch)
 
-            # We want to minimize the ouTput of the discriminator when fed with a fake sample...
+            # We want to minimize the output of the discriminator when fed with a fake sample...
             output = curr_discriminator(fake.detach())
+
             err_discriminator_fake = output.mean()
             err_discriminator_fake.backward(retain_graph=True)
 
-            fake_discriminator_output = output.mean().item()
+            discr_output_fake = output.mean().item()
 
             # This kind of regularization term is what completes the formation of the WGAN-GP loss that we are using.
             # as mentioned in the SinGAN paper. Very elegant ;)
-            gradient_penalty = functions.calc_gradient_penalty(curr_discriminator, real, fake, opt.lambda_grad,
+            gradient_penalty = functions.calc_gradient_penalty(curr_discriminator, current_real_patch, fake, opt.lambda_grad,
                                                                opt.device)
             gradient_penalty.backward()
 
@@ -351,6 +358,7 @@ def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, c
         # house-made reporting... what about using W&B??
         errD2plot.append(discriminator_error.detach())
 
+
         ############################
         # (2) Update G network: maximize D(G(z))
         ###########################
@@ -358,29 +366,35 @@ def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, c
         for j in range(opt.Gsteps):
             curr_generator.zero_grad()
             output = curr_discriminator(fake)
-            # D_fake_map = output.detach()
-            errG = -output.mean()
-            errG.backward(retain_graph=True)
+            # we want to maximize this output (this time, using the generator's parameters).
+            # it is equivalent to minimize its negative:
+            # (our optimizers minimizes by default, so we do this second thing).
+            generator_error = -output.mean()
+            generator_error.backward(retain_graph=True)
+
             if alpha != 0:
+                # this means the reconstruction loss weight is not zero.
+                # so we need to compute the reconstruction loss.
                 loss = nn.MSELoss()
                 if opt.mode == 'paint_train':
-                    z_prev = functions.quant2centers(z_prev, centers)
-                    plt.imsave('%s/z_prev.png' % (opt.outf), functions.convert_image_np(z_prev), vmin=0, vmax=1)
-                Z_opt = opt.noise_amp * z_opt + z_prev
-                rec_loss = alpha * loss(curr_generator(Z_opt.detach(), z_prev), real)
-                rec_loss.backward(retain_graph=True)
-                rec_loss = rec_loss.detach()
+                    prev_reconstructed_patch = functions.quant2centers(prev_reconstructed_patch, centers)
+                    plt.imsave('%s/prev_reconstructed_patch.png' % (opt.outf), functions.convert_image_np(prev_reconstructed_patch), vmin=0, vmax=1)
+                final_noise_map = opt.noise_amp * z_opt + prev_reconstructed_patch
+                reconstructed_image = curr_generator(final_noise_map.detach(), prev_reconstructed_patch)
+                reconstruction_loss = alpha * loss(reconstructed_image, current_real_patch)
+                reconstruction_loss.backward(retain_graph=True)
+                reconstruction_loss = reconstruction_loss.detach()
             else:
-                Z_opt = z_opt
-                rec_loss = 0
+                final_noise_map = z_opt
+                reconstruction_loss = 0
             # print("Error is here...!")
-            # errG.backward(retain_graph=True)
+            # generator_error.backward(retain_graph=True)
         optimizerG.step()
 
-        errG2plot.append(errG.detach() + rec_loss)
-        D_real2plot.append(D_x)
-        D_fake2plot.append(fake_discriminator_output)
-        z_opt2plot.append(rec_loss)
+        errG2plot.append(generator_error.detach() + reconstruction_loss)
+        D_real2plot.append(discr_output_real)
+        D_fake2plot.append(discr_output_fake)
+        z_opt2plot.append(reconstruction_loss)
 
         if epoch % 25 == 0 or epoch == (opt.niter - 1):
             print('scale %d:[%d/%d]' % (len(curr_generator_list), epoch, opt.niter))
@@ -388,13 +402,15 @@ def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, c
         if epoch % 500 == 0 or epoch == (opt.niter - 1):
             plt.imsave('%s/fake_sample.png' % (opt.outf), functions.convert_image_np(fake.detach()), vmin=0, vmax=1)
             plt.imsave('%s/G(z_opt).png' % (opt.outf),
-                       functions.convert_image_np(curr_generator(Z_opt.detach(), z_prev).detach()), vmin=0, vmax=1)
+                       functions.convert_image_np(curr_generator(final_noise_map.detach(),
+                                                                 prev_reconstructed_patch).detach()),
+                       vmin=0, vmax=1)
             # plt.imsave('%s/D_fake.png'   % (opt.outf), functions.convert_image_np(D_fake_map))
             # plt.imsave('%s/D_real.png'   % (opt.outf), functions.convert_image_np(D_real_map))
             # plt.imsave('%s/z_opt.png'    % (opt.outf), functions.convert_image_np(z_opt.detach()), vmin=0, vmax=1)
-            # plt.imsave('%s/prev.png'     %  (opt.outf), functions.convert_image_np(prev), vmin=0, vmax=1)
+            # plt.imsave('%s/prev_random_patch.png'     %  (opt.outf), functions.convert_image_np(prev_random_patch), vmin=0, vmax=1)
             # plt.imsave('%s/noise.png'    %  (opt.outf), functions.convert_image_np(noise), vmin=0, vmax=1)
-            # plt.imsave('%s/z_prev.png'   % (opt.outf), functions.convert_image_np(z_prev), vmin=0, vmax=1)
+            # plt.imsave('%s/prev_reconstructed_patch.png'   % (opt.outf), functions.convert_image_np(prev_reconstructed_patch), vmin=0, vmax=1)
 
             torch.save(z_opt, '%s/z_opt.pth' % (opt.outf))
 
@@ -424,7 +440,7 @@ def draw_concat(list_of_generators, noise_patch_list, real_patches_pyramid,
     tensors that are generated...
     real_patches_pyramid
     noise_amps_list
-    in_s: the lowest scale image patch
+    in_s:
     mode: if "rand", then the image is generated with the usage of new pseudo random noise maps and patches of the ù
     provided image. If set to "rec", instead, the up-sampling process will use the provided list of saved noise maps to
     produce the up-sampled output.
