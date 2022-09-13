@@ -51,7 +51,23 @@ class WDiscriminator(nn.Module):
 
 
 class GeneratorConcatSkip2CleanAdd(nn.Module):
+
+
     def __init__(self, opt):
+
+        '''
+        From the SinGAN paper:
+        "Each generator Gn is responsible
+        of producing realistic image samples w.r.t. the patch distribution
+        in the corresponding image xn. This is achieved
+        through adversarial training, where Gn learns to fool an associated
+        discriminator Dn, which attempts to distinguish
+        patches in the generated samples from patches in xn".
+        Parameters
+        ----------
+        opt
+        '''
+
         super(GeneratorConcatSkip2CleanAdd, self).__init__()
         self.is_cuda = torch.cuda.is_available()
         N = opt.nfc
@@ -65,10 +81,19 @@ class GeneratorConcatSkip2CleanAdd(nn.Module):
             nn.Conv2d(max(N,opt.min_nfc),opt.nc_im,kernel_size=opt.ker_size,stride =1,padding=opt.padd_size),
             nn.Tanh()
         )
-    def forward(self,x,y):
-        x = self.head(x)
-        x = self.body(x)
-        x = self.tail(x)
-        ind = int((y.shape[2]-x.shape[2])/2)
-        y = y[:,:,ind:(y.shape[2]-ind),ind:(y.shape[3]-ind)]
-        return x+y
+
+    def forward(self, spatial_noise, prev_upsamp_patch):
+
+        spatial_noise = self.head(spatial_noise)
+        spatial_noise = self.body(spatial_noise)
+        spatial_noise = self.tail(spatial_noise)
+
+        ind = int((prev_upsamp_patch.shape[2] - spatial_noise.shape[2]) / 2)
+
+        prev_upsamp_patch = prev_upsamp_patch[:, :, ind:(prev_upsamp_patch.shape[2] - ind), ind:(prev_upsamp_patch.shape[3] - ind)]
+
+        # Fromt the SinGAN paper: The role of the convonlutional
+        # layers is to generate the missing details in $( \tilde{x}_{n+1}) \uparrow^r $
+        # (residual learning [22, 57]). Namely, Gn performs the operation
+        # (and then puts exactly the equivalent of the following):
+        return spatial_noise + prev_upsamp_patch

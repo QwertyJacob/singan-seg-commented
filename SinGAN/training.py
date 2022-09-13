@@ -44,6 +44,7 @@ def train(options, generator_list, noise_maps_list, real_patch_list, noise_amps_
             current_generator.load_state_dict(torch.load('%s/%d/netG.pth' % (options.out_, scale_num - 1)))
             current_discriminator.load_state_dict(torch.load('%s/%d/netD.pth' % (options.out_, scale_num - 1)))
 
+
         z_curr, in_s, current_generator = train_single_scale(current_discriminator,
                                                              current_generator,
                                                              real_patch_list,
@@ -78,6 +79,14 @@ def train(options, generator_list, noise_maps_list, real_patch_list, noise_amps_
 def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, curr_generator_list, noise_patch_list,
                        in_s, noise_amps_list, opt, centers=None):
     '''
+    From the SinGAN paper: The generation of an image sample starts at the coarsest
+        # scale and sequentially passes through all generators up to
+        # the finest scale, with noise injected at every scale. All the
+        # generators and discriminators have the same receptive field
+        # and thus capture structures of decreasing size as we go up
+        # the generation process. At the coarsest scale, the generation
+        # is purely generative, i.e. GN maps spatial white Gaussian
+        # noise zN to an image sample $\tilde{x}_N$,
 
     Parameters
     ----------
@@ -330,6 +339,12 @@ def train_single_scale(curr_discriminator, curr_generator, real_patch_pyramid, c
 
             ##
             # Now we generate our fake sample :)
+            # From the SinGAN paper: The input to Gn is a random noise image zn, and the generated image from the
+            # previous scale $\tilde{x}_n$, up-sampled to the current resolution (except for
+            # the coarsest level which is purely generative).
+            # Also, in other parts: Thus, in addition
+            # to spatial noise zn, each generator Gn accepts an up-sampled
+            # version of the [generated] image from the coarser scale
             fake = curr_generator(noise.detach(), prev_random_patch)
 
             # We want to minimize the output of the discriminator when fed with a fake sample...
@@ -428,6 +443,8 @@ def draw_concat(list_of_generators, noise_patch_list, real_patches_pyramid,
     Generates an up-sampled version of a previous lowest scale image patch THROUGH A GENERATIVE PROCESS.
     To do that, it uses the generator network and the set of possible lowest scale patches
     of the current scale patch. This is the reason whe it receives in input a list of generator models.
+    From the SinGAN paper: The generation process at level n involves all generators $ \{ G_{N} . . . G_{n} \} $ and
+    all noise maps $ \{ z_N, . . . , z_n \} $ up to this level.
 
     Parameters
     ----------
